@@ -1,0 +1,51 @@
+name: live-trading-bot
+
+on:
+  schedule:
+    # Every 5 minutes, Mon-Fri, 13:00-21:55 UTC.
+    # Covers 09:30-16:00 ET during EDT and 08:30-15:00 ET during EST.
+    # The in-code market-hours check (trading_client.get_clock) gates
+    # actual trading; the cron just needs to fire wide enough to cover
+    # the session under both DST regimes.
+    - cron: '*/5 13-21 * * 1-5'
+  workflow_dispatch:    # manual trigger for smoke tests
+
+# Don't pile up runs if one is slow. Stateless bot, so cancelling old
+# tick-in-flight when the next fires is fine; queueing is also safe.
+concurrency:
+  group: live-trading-bot
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    # One-click kill switch via repo Variables (Settings -> Secrets and
+    # variables -> Actions -> Variables). Set LIVE_ENABLED="true" to arm,
+    # unset or any other value to disable.
+    if: ${{ vars.LIVE_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install talib system library
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libta-lib0 libta-lib-dev
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot (live)
+        env:
+          ALPACA_KEY: ${{ secrets.LIVE_ALPACA_KEY }}
+          ALPACA_SECRET: ${{ secrets.LIVE_ALPACA_SECRET }}
+          ALPACA_PAPER: "false"
+          SYMBOLS: "QQQ"
+          RISK_PCT: "0.5"
+          MINUTES_HISTORY: "60"
+        run: python src/lambda_function.py
