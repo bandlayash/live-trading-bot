@@ -18,7 +18,10 @@ concurrency:
 
 jobs:
   live:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is 24.04, which dropped libta-lib0/libta-lib-dev
+    # from default repos. 22.04 still ships them and matches the 0.4.x ABI
+    # that the ta-lib==0.4.32 Python wrapper builds against.
+    runs-on: ubuntu-22.04
     timeout-minutes: 4
     # One-click kill switch via repo Variables (Settings -> Secrets and
     # variables -> Actions -> Variables). Set LIVE_ENABLED="true" to arm,
