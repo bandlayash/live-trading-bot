@@ -18,10 +18,7 @@ concurrency:
 
 jobs:
   live:
-    # Pinned: ubuntu-latest is 24.04, which dropped libta-lib0/libta-lib-dev
-    # from default repos. 22.04 still ships them and matches the 0.4.x ABI
-    # that the ta-lib==0.4.32 Python wrapper builds against.
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 4
     # One-click kill switch via repo Variables (Settings -> Secrets and
     # variables -> Actions -> Variables). Set LIVE_ENABLED="true" to arm,
@@ -35,10 +32,12 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install talib system library
+      - name: Install TA-Lib C library
+        # libta-lib isn't in Ubuntu's default repos. Install the official
+        # .deb from ta-lib's GitHub releases.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libta-lib0 libta-lib-dev
+          curl -fsSL -o ta-lib.deb https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
+          sudo dpkg -i ta-lib.deb || sudo apt-get install -f -y
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
