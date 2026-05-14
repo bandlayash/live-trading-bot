@@ -1,14 +1,11 @@
 name: live-trading-bot
 
 on:
-  schedule:
-    # Every 5 minutes, Mon-Fri, 13:00-21:55 UTC.
-    # Covers 09:30-16:00 ET during EDT and 08:30-15:00 ET during EST.
-    # The in-code market-hours check (trading_client.get_clock) gates
-    # actual trading; the cron just needs to fire wide enough to cover
-    # the session under both DST regimes.
-    - cron: '*/5 13-21 * * 1-5'
-  workflow_dispatch:    # manual trigger for smoke tests
+  # Scheduling is handled externally by cron-job.org, which fires
+  # workflow_dispatch every 5 minutes during market hours via the
+  # GitHub REST API. GitHub Actions' native `schedule:` was dropping
+  # ~95% of ticks under platform load, so it's been removed.
+  workflow_dispatch:
 
 # Don't pile up runs if one is slow. Stateless bot, so cancelling old
 # tick-in-flight when the next fires is fine; queueing is also safe.
