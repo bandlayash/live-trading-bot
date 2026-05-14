@@ -127,8 +127,7 @@ def select_spread_contracts(underlying: str, current_price: float):
     long_contract = min(available, key=lambda c: abs(float(c.strike_price) - current_price))
     long_strike = float(long_contract.strike_price)
 
-    # Short leg: ~$10-15 above long strike (3-5% OTM for QQQ ~$450)
-    target_short_strike = long_strike + max(10, current_price * 0.03)
+    target_short_strike = long_strike + current_price * 0.04
     candidates = [c for c in available if float(c.strike_price) > long_strike]
     if not candidates:
         logger.warning("No OTM strikes available above %.2f for %s", long_strike, underlying)

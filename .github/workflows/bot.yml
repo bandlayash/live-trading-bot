@@ -47,7 +47,7 @@ jobs:
           ALPACA_KEY: ${{ secrets.LIVE_ALPACA_KEY }}
           ALPACA_SECRET: ${{ secrets.LIVE_ALPACA_SECRET }}
           ALPACA_PAPER: "false"
-          SYMBOLS: "QQQ"
-          RISK_PCT: "0.5"
+          SYMBOLS: "IWM"
+          RISK_PCT: "0.4"
           MINUTES_HISTORY: "60"
         run: python src/lambda_function.py

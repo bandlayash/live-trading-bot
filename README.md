@@ -1,6 +1,6 @@
 # live-trading-bot
 
-A live-money options bot that trades QQQ bull call spreads on a mean-reversion
+A live-money options bot that trades IWM bull call spreads on a mean-reversion
 signal. It runs on GitHub Actions cron, polls every 5 minutes during market
 hours, and submits orders through Alpaca's API.
 
@@ -40,19 +40,26 @@ Linux VM, installs the TA-Lib C library, installs the Python deps, and runs
 
 1. Asks Alpaca whether the market is open. If not, it logs `market_closed` and
    exits.
-2. Pulls the last 60 1-minute bars for QQQ from Alpaca's IEX feed.
+2. Pulls the last 60 1-minute bars for IWM from Alpaca's IEX feed.
 3. Computes two indicators on those bars: **RSI(14)** and **EMA(9)**.
 4. If the latest bar's RSI is below 30 *and* price is below EMA9 — and we
    don't already have an open spread — it opens a bull call spread (buy an
-   ATM call, sell a slightly OTM call), sized at 50% of equity.
+   ATM call, sell a slightly OTM call), sized at 40% of equity.
 5. If the latest bar's RSI is above 70 *and* price is above EMA9 — and we
    have an open spread — it closes the spread.
 6. Otherwise it does nothing and the workflow ends.
 
 There's no portfolio management, no risk-parity, no fancy hedging. It's a
-single-pair mean-reversion bot. If QQQ has dropped enough to look oversold,
+single-pair mean-reversion bot. If IWM has dropped enough to look oversold,
 make a small directional bet that it bounces. If it's risen enough to look
 overbought, take profits.
+
+Why IWM and not QQQ? The bot was originally written for QQQ, but at ~$720
+the cheapest bull call spread on QQQ costs ~$700-800 per contract — more
+than 2.5× the entire $270 account. IWM at ~$190 keeps the same strategy
+mechanics (very liquid weeklies, strong intraday mean-reversion) but with
+spread debits in the $40-$200 range. The codepath is unchanged; only the
+ticker and the strike-width formula were retuned.
 
 The bot is a portfolio piece as much as a trading system. At $270 of starting
 equity, the goal is to learn the operational mechanics of options trading and
@@ -65,25 +72,26 @@ and observability matter more.
 
 | Knob               | Value                                | Meaning                                  |
 |--------------------|--------------------------------------|------------------------------------------|
-| Underlying         | QQQ                                  | Nasdaq-100 ETF                           |
+| Underlying         | IWM                                  | Russell 2000 small-cap ETF               |
 | Bar timeframe      | 1 minute                             | We make decisions on minute bars         |
 | History window     | 60 bars                              | Last 60 minutes considered per run       |
 | RSI period         | 14                                   | Classic Wilder setting                   |
 | EMA period         | 9                                    | Short-term trend filter                  |
 | BUY trigger        | RSI < 30 AND price < EMA9            | Oversold AND below short-term trend      |
 | SELL trigger       | RSI > 70 AND price > EMA9            | Overbought AND above short-term trend    |
-| Spread structure   | Bull call: ATM long + ~3-5% OTM short| Defined-risk bullish bet                 |
+| Spread structure   | Bull call: ATM long + ~4% OTM short  | Defined-risk bullish bet                 |
 | Days to expiration | 7-14 days                            | Weekly options window                    |
-| Risk per trade     | `RISK_PCT * equity`                  | Currently 50% of equity (~$135 budget)   |
+| Risk per trade     | `RISK_PCT * equity`                  | Currently 40% of equity (~$108 budget)   |
 | Account equity     | ~$270                                | Starting capital                         |
 | Cadence            | Every 5 min                          | GitHub Actions cron, weekdays during RTH |
 
-With $270 of equity and a 50% risk allocation, the trade budget is $135. Bull
-call spreads on QQQ at 7-14 DTE typically cost $100-$200 in net debit per
-contract, so each signal will buy either 0 or 1 contracts. That's intentional —
-at this size, half the signals will fail the budget check, which biases the
-bot toward cheaper (lower-IV) entries and leaves capital for a second attempt
-after a loss.
+With $270 of equity and a 40% risk allocation, the trade budget is $108. Bull
+call spreads on IWM at 7-14 DTE typically cost $40-$200 in net debit per
+contract, clustering around $60-$120 in normal IV. Most signals will fit;
+the elevated-IV tail (debit above $1.08) gets filtered out via the
+`insufficient_budget` path, which is intentional — high-IV entries carry
+the most IV-crush risk on the bounce, so skipping them is risk management,
+not a missed opportunity.
 
 ---
 
@@ -140,7 +148,7 @@ For EMA9, `α = 2/10 = 0.2`. So today's price gets 20% of the weight; yesterday'
 EMA (which was itself 20% based on yesterday's price, 80% on the day before
 that's EMA, and so on) gets the remaining 80%.
 
-The practical effect: EMA9 tracks the recent trend snappily. If QQQ has been
+The practical effect: EMA9 tracks the recent trend snappily. If IWM has been
 ticking up for the last few minutes, EMA9 climbs with it. If price suddenly
 drops, EMA9 lags a few bars but catches up faster than a simple moving average
 would.
@@ -150,7 +158,7 @@ trend line, or above?
 
 ### Why we need both indicators
 
-RSI on its own gives bad signals in strong trends. If QQQ is in a sustained
+RSI on its own gives bad signals in strong trends. If IWM is in a sustained
 downtrend, RSI can sit below 30 for hours — every "buy when RSI<30" entry just
 catches falling knives. Same problem in reverse on the way up.
 
@@ -166,8 +174,8 @@ grade signal; it's to run a real strategy end-to-end and see what breaks.
 
 ### Bull call spreads: capped upside, capped risk
 
-Instead of buying a single call (cheaper than buying QQQ outright but still
-expensive at $100-300 a pop for ATM weeklies), the bot buys a **bull call
+Instead of buying a single call (cheaper than buying IWM outright but still
+expensive at $60-$120 a pop for ATM weeklies), the bot buys a **bull call
 spread** — two simultaneous trades:
 
 - **Long leg**: buy 1 call at strike `K1` (around current price, ATM).
@@ -217,10 +225,12 @@ up the whole account.
 
 Strike selection in the code:
 
-- **Long strike**: the contract closest to current QQQ price (ATM, often
+- **Long strike**: the contract closest to current IWM price (ATM, often
   slightly ITM).
 - **Short strike**: the contract whose strike is roughly
-  `long_strike + max($10, 3% × price)` — typically $10-15 above the long leg.
+  `long_strike + 4% × price` — for IWM at ~$190 that's about $7-8 above the
+  long leg, which snaps to the nearest available listed strike (typically
+  $1 spacing in the relevant band).
 - **Expiration**: the nearest available between 7 and 14 days out
   (usually the upcoming weekly).
 
@@ -234,15 +244,15 @@ budget = equity × RISK_PCT
 qty    = floor(budget / (net_debit × 100))
 ```
 
-With current settings (equity ≈ $270, `RISK_PCT = 0.5`):
+With current settings (equity ≈ $270, `RISK_PCT = 0.4`):
 
 ```
-budget = 270 × 0.5 = $135
+budget = 270 × 0.4 = $108
 
-net_debit = $0.80 → cost = $80   → qty = floor(135/80)  = 1
-net_debit = $1.20 → cost = $120  → qty = floor(135/120) = 1
-net_debit = $1.50 → cost = $150  → qty = floor(135/150) = 0 (skip)
-net_debit = $2.00 → cost = $200  → qty = floor(135/200) = 0 (skip)
+net_debit = $0.60 → cost = $60   → qty = floor(108/60)  = 1
+net_debit = $1.00 → cost = $100  → qty = floor(108/100) = 1
+net_debit = $1.20 → cost = $120  → qty = floor(108/120) = 0 (skip)
+net_debit = $2.00 → cost = $200  → qty = floor(108/200) = 0 (skip)
 ```
 
 The `floor` matters — we never buy a fractional contract. If the budget can't
@@ -263,7 +273,7 @@ if bid_ask_width / mid > 0.20:
 Why bother: an option quoted at $1.00 mid with a $0.50 bid-ask gap (so $0.75
 bid, $1.25 ask) means you'd likely pay $1.25 on entry and sell at $0.75 on
 exit, eating a $0.50 round-trip cost on a $1.00 position. That's 50% of the
-trade lost to spread cost alone, before any market move. Liquid QQQ weeklies
+trade lost to spread cost alone, before any market move. Liquid IWM weeklies
 usually have tight spreads, but the check is cheap insurance against the
 occasional thin strike.
 
@@ -394,7 +404,7 @@ money):
 $env:ALPACA_KEY = "<paper-key>"
 $env:ALPACA_SECRET = "<paper-secret>"
 $env:ALPACA_PAPER = "true"
-$env:SYMBOLS = "QQQ"
+$env:SYMBOLS = "IWM"
 $env:RISK_PCT = "0.05"
 $env:MINUTES_HISTORY = "60"
 python src/lambda_function.py
