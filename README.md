@@ -1,8 +1,8 @@
 # live-trading-bot
 
-A live-money options bot that trades IWM bull call spreads on a mean-reversion
-signal. It runs on GitHub Actions cron, polls every 5 minutes during market
-hours, and submits orders through Alpaca's API.
+A live-money options bot that trades TQQQ bull call spreads on a mean-reversion
+signal. It runs on GitHub Actions, polls every 5 minutes during market hours,
+and submits orders through Alpaca's API.
 
 This is the live-money counterpart to my
 [`trading-bot`](https://github.com/bandlayash/trading-bot) repo, which runs the
@@ -10,9 +10,6 @@ same strategy on a paper Alpaca account via AWS Lambda + EventBridge. That bot
 is unchanged and keeps running independently — this one is deliberately
 separate so the AWS setup keeps its CloudWatch dashboard and other niceties
 untouched.
-
-If you want the full migration context (why the new bot is on Actions, the
-tradeoffs, the AWS history), read [`handoff.md`](./handoff.md).
 
 ## Contents
 
@@ -40,7 +37,7 @@ Linux VM, installs the TA-Lib C library, installs the Python deps, and runs
 
 1. Asks Alpaca whether the market is open. If not, it logs `market_closed` and
    exits.
-2. Pulls the last 60 1-minute bars for IWM from Alpaca's IEX feed.
+2. Pulls the last 60 1-minute bars for TQQQ from Alpaca's IEX feed.
 3. Computes two indicators on those bars: **RSI(14)** and **EMA(9)**.
 4. If the latest bar's RSI is below 30 *and* price is below EMA9 — and we
    don't already have an open spread — it opens a bull call spread (buy an
@@ -50,16 +47,19 @@ Linux VM, installs the TA-Lib C library, installs the Python deps, and runs
 6. Otherwise it does nothing and the workflow ends.
 
 There's no portfolio management, no risk-parity, no fancy hedging. It's a
-single-pair mean-reversion bot. If IWM has dropped enough to look oversold,
+single-pair mean-reversion bot. If TQQQ has dropped enough to look oversold,
 make a small directional bet that it bounces. If it's risen enough to look
 overbought, take profits.
 
-Why IWM and not QQQ? The bot was originally written for QQQ, but at ~$720
-the cheapest bull call spread on QQQ costs ~$700-800 per contract — more
-than 2.5× the entire $270 account. IWM at ~$190 keeps the same strategy
-mechanics (very liquid weeklies, strong intraday mean-reversion) but with
-spread debits in the $40-$200 range. The codepath is unchanged; only the
-ticker and the strike-width formula were retuned.
+Why TQQQ? Underlying size is the constraint. With ~$270 of equity and a 40%
+risk budget ($108), a single bull call spread must cost ≤ $1.08 net debit.
+IWM at ~$215 produced 4%-OTM spreads ~$8 wide, costing ~$3.30/contract —
+more than the entire budget. TQQQ at ~$60 produces 4%-OTM spreads ~$2.50
+wide, costing $0.80–$1.10 net debit, comfortably within reach. It also has
+very liquid weekly options (tight bid-ask < 5% of mid) and 3× leverage
+that ensures RSI crosses 30/70 frequently on 1-minute bars — more signals
+than the underlying QQQ alone. The mean-reversion logic is unchanged:
+RSI < 30 on TQQQ means QQQ is oversold; the spread bets on a bounce.
 
 The bot is a portfolio piece as much as a trading system. At $270 of starting
 equity, the goal is to learn the operational mechanics of options trading and
@@ -72,7 +72,7 @@ and observability matter more.
 
 | Knob               | Value                                | Meaning                                  |
 |--------------------|--------------------------------------|------------------------------------------|
-| Underlying         | IWM                                  | Russell 2000 small-cap ETF               |
+| Underlying         | TQQQ                                 | ProShares UltraPro QQQ (3× leveraged)   |
 | Bar timeframe      | 1 minute                             | We make decisions on minute bars         |
 | History window     | 60 bars                              | Last 60 minutes considered per run       |
 | RSI period         | 14                                   | Classic Wilder setting                   |
@@ -86,12 +86,11 @@ and observability matter more.
 | Cadence            | Every 5 min                          | GitHub Actions cron, weekdays during RTH |
 
 With $270 of equity and a 40% risk allocation, the trade budget is $108. Bull
-call spreads on IWM at 7-14 DTE typically cost $40-$200 in net debit per
-contract, clustering around $60-$120 in normal IV. Most signals will fit;
-the elevated-IV tail (debit above $1.08) gets filtered out via the
-`insufficient_budget` path, which is intentional — high-IV entries carry
-the most IV-crush risk on the bounce, so skipping them is risk management,
-not a missed opportunity.
+call spreads on TQQQ at 7-14 DTE typically cost $0.80–$1.10 net debit per
+contract in normal IV. Most signals will fit; the elevated-IV tail (debit
+above $1.08) gets filtered out via the `insufficient_budget` path, which is
+intentional — high-IV entries carry the most IV-crush risk on the bounce, so
+skipping them is risk management, not a missed opportunity.
 
 ---
 
@@ -148,7 +147,7 @@ For EMA9, `α = 2/10 = 0.2`. So today's price gets 20% of the weight; yesterday'
 EMA (which was itself 20% based on yesterday's price, 80% on the day before
 that's EMA, and so on) gets the remaining 80%.
 
-The practical effect: EMA9 tracks the recent trend snappily. If IWM has been
+The practical effect: EMA9 tracks the recent trend snappily. If TQQQ has been
 ticking up for the last few minutes, EMA9 climbs with it. If price suddenly
 drops, EMA9 lags a few bars but catches up faster than a simple moving average
 would.
@@ -158,7 +157,7 @@ trend line, or above?
 
 ### Why we need both indicators
 
-RSI on its own gives bad signals in strong trends. If IWM is in a sustained
+RSI on its own gives bad signals in strong trends. If TQQQ is in a sustained
 downtrend, RSI can sit below 30 for hours — every "buy when RSI<30" entry just
 catches falling knives. Same problem in reverse on the way up.
 
@@ -174,8 +173,8 @@ grade signal; it's to run a real strategy end-to-end and see what breaks.
 
 ### Bull call spreads: capped upside, capped risk
 
-Instead of buying a single call (cheaper than buying IWM outright but still
-expensive at $60-$120 a pop for ATM weeklies), the bot buys a **bull call
+Instead of buying a single call (cheaper than buying TQQQ outright but still
+meaningful at $1-$3 a pop for ATM weeklies), the bot buys a **bull call
 spread** — two simultaneous trades:
 
 - **Long leg**: buy 1 call at strike `K1` (around current price, ATM).
@@ -225,12 +224,12 @@ up the whole account.
 
 Strike selection in the code:
 
-- **Long strike**: the contract closest to current IWM price (ATM, often
+- **Long strike**: the contract closest to current TQQQ price (ATM, often
   slightly ITM).
 - **Short strike**: the contract whose strike is roughly
-  `long_strike + 4% × price` — for IWM at ~$190 that's about $7-8 above the
+  `long_strike + 4% × price` — for TQQQ at ~$60 that's about $2.40 above the
   long leg, which snaps to the nearest available listed strike (typically
-  $1 spacing in the relevant band).
+  $0.50 or $1 spacing in the relevant band).
 - **Expiration**: the nearest available between 7 and 14 days out
   (usually the upcoming weekly).
 
@@ -273,7 +272,7 @@ if bid_ask_width / mid > 0.20:
 Why bother: an option quoted at $1.00 mid with a $0.50 bid-ask gap (so $0.75
 bid, $1.25 ask) means you'd likely pay $1.25 on entry and sell at $0.75 on
 exit, eating a $0.50 round-trip cost on a $1.00 position. That's 50% of the
-trade lost to spread cost alone, before any market move. Liquid IWM weeklies
+trade lost to spread cost alone, before any market move. Liquid TQQQ weeklies
 usually have tight spreads, but the check is cheap insurance against the
 occasional thin strike.
 
@@ -285,12 +284,11 @@ occasional thin strike.
 live_trading_bot/
 ├── .github/
 │   └── workflows/
-│       └── bot.yml             # GitHub Actions cron + manual trigger
+│       └── bot.yml             # GitHub Actions workflow + manual trigger
 ├── src/
 │   └── lambda_function.py      # All strategy + Alpaca client code
 ├── .gitignore
 ├── README.md                   # You're reading it
-├── handoff.md                  # Migration context from the AWS repo
 └── requirements.txt            # alpaca-py, pandas, numpy, ta-lib
 ```
 
@@ -298,11 +296,10 @@ live_trading_bot/
 
 Defines the scheduled job:
 
-- **Trigger**: `cron: '*/5 13-21 * * 1-5'` (UTC) — every 5 minutes, weekdays,
-  13:00-21:55 UTC. That window covers 09:30-16:00 ET in both EDT and EST, so
-  the cron doesn't have to deal with daylight saving. The in-code
-  `trading_client.get_clock()` check narrows further to actual regular trading
-  hours.
+- **Trigger**: `workflow_dispatch` only — scheduling is handled externally by
+  cron-job.org, which fires the workflow every 5 minutes during market hours
+  via the GitHub REST API. The in-code `trading_client.get_clock()` check
+  narrows further to actual regular trading hours.
 - **Kill switch**: `if: ${{ vars.LIVE_ENABLED == 'true' }}` — the job is gated
   on a repo Variable. Set `LIVE_ENABLED` to anything other than `true` (or
   delete it) and every invocation, cron or manual, skips immediately. No
@@ -359,11 +356,6 @@ ta-lib==0.6.8       # technical indicators (RSI, EMA)
 The `ta-lib` Python package is just bindings — the underlying TA-Lib C library
 is installed separately in the workflow before pip runs.
 
-### `handoff.md`
-
-The original migration document explaining the move from AWS Lambda +
-EventBridge to GitHub Actions. Useful background, not required reading.
-
 ---
 
 ## Running it
@@ -404,7 +396,7 @@ money):
 $env:ALPACA_KEY = "<paper-key>"
 $env:ALPACA_SECRET = "<paper-secret>"
 $env:ALPACA_PAPER = "true"
-$env:SYMBOLS = "IWM"
+$env:SYMBOLS = "TQQQ"
 $env:RISK_PCT = "0.05"
 $env:MINUTES_HISTORY = "60"
 python src/lambda_function.py

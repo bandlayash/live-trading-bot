@@ -13,6 +13,9 @@ concurrency:
   group: live-trading-bot
   cancel-in-progress: false
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   live:
     runs-on: ubuntu-latest
@@ -44,7 +47,7 @@ jobs:
           ALPACA_KEY: ${{ secrets.LIVE_ALPACA_KEY }}
           ALPACA_SECRET: ${{ secrets.LIVE_ALPACA_SECRET }}
           ALPACA_PAPER: "false"
-          SYMBOLS: "IWM"
+          SYMBOLS: "TQQQ"
           RISK_PCT: "0.4"
           MINUTES_HISTORY: "60"
         run: python src/lambda_function.py
